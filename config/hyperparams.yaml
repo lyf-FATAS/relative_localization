@@ -1,0 +1,26 @@
+%YAML:1.0
+
+drone_id:
+  - 6
+  - 9
+uwb_anchor_id_and_position:
+  - id: 10
+    position: [0.0, 0.0, 0.0]
+  - id: 11
+    position: [10.0, 0.0, 0.0]
+
+odom_topic: "/odom_fusion/odom"
+revised_odom_topic: "revised_odom"
+swarm_odom_topic: "/others_odom"
+distance_measurement_topic: "/nlink_linktrack_nodeframe3"
+bearing_measurement_topic: "/bearing"
+drift_from_center_topic: "/drift_from_center"
+drift_to_edges_topic: "/drift_to_edges"
+
+regularization_cost_weight: 1.0
+distance_cost_weight: 1.0
+bearing_cost_weight: 1.0
+optimize_z: 1
+max_deanonymization_bearing_angle: 0.174533  # 10 degrees in radians
+
+glog_severity_level: 0  # 0: Info  1: Warning  2: Error  3: Fatal

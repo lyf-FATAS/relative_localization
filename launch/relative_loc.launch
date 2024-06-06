@@ -1,0 +1,3 @@
+<launch>
+    <node name="relative_loc" pkg="relative_loc" type="relative_loc_node" output="screen" args="$(find relative_loc)/config/hyperparams.yaml" />
+</launch>
