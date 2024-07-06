@@ -1,26 +1,50 @@
 %YAML:1.0
 
-drone_id:
-  - 6
-  - 9
+drone_id_and_uwb_ext:
+  - id: 6
+    is_lidar: 1
+    uwb_ext: [-0.01, 0.05, 0.05]
+  - id: 9
+    is_lidar: 0
+    uwb_ext: [-0.01, -0.07, 0.0]
+uwb_bias: 0.25
+consider_uwb_extrinsic: 1
 uwb_anchor_id_and_position:
-  - id: 10
-    position: [0.0, 0.0, 0.0]
-  - id: 11
-    position: [10.0, 0.0, 0.0]
+  - id: 23
+    position: [0.0, 10.0, 2.0]
+  - id: 77
+    position: [10.0, 10.0, 2.0]
+  - id: 250
+    position: [20.0, 10.0, 2.0]
 
-odom_topic: "/odom_fusion/odom"
+# odom_topic: "/odom_fusion/odom"
+odom_topic: "/Odometry_map"
 revised_odom_topic: "revised_odom"
 swarm_odom_topic: "/others_odom"
-distance_measurement_topic: "/nlink_linktrack_nodeframe3"
-bearing_measurement_topic: "/bearing"
+swarm_odom_freq: 7.5
+distance_measurement_topic: "/distance_meas"
+distance_measurement_freq: 10.0
+bearing_measurement_topic: "/bearing_meas"
+bearing_measurement_freq: 5.0
 drift_from_center_topic: "/drift_from_center"
 drift_to_edges_topic: "/drift_to_edges"
+# Debug topics
+swarm_dist_est_topic: "/debug_distance_est"
+swarm_dist_meas_topic: "/debug_distance_meas"
 
-regularization_cost_weight: 1.0
+sliding_window_length: 5                   # In seconds
+optimize_per_N_meas: 3
+prior_cost_weight: 0.1
+regularization_cost_weight: 0.1
 distance_cost_weight: 1.0
 bearing_cost_weight: 1.0
-optimize_z: 1
-max_deanonymization_bearing_angle: 0.174533  # 10 degrees in radians
+distance_outlier_threshold: 0.4
+optimize_z: 0
+optimize_yaw: 0
+max_deanonymization_bearing_angle: 20.0    # In degrees
+huber_threshold: 1.0
 
-glog_severity_level: 0  # 0: Info  1: Warning  2: Error  3: Fatal
+ceres_verbosity_level: 0                   # 0: Silent  1: Quiet    2: Verbose
+glog_severity_level: 0                     # 0: Info    1: Warning  2: Error    3: Fatal
+publish_debug_topics: 1
+custom_debug_output: 0
