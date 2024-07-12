@@ -267,6 +267,9 @@ private:
 
 int main(int argc, char **argv)
 {
+    // Quaterniond drift_q_(AngleAxisd(-0.15, Vector3d::UnitZ()));
+    // cout << -(drift_q_ * Vector3d(-0.66, -1.04, 0.23)).transpose() << endl;
+
     google::InitGoogleLogging(argv[0]);
     FLAGS_colorlogtostderr = true;
 
@@ -300,6 +303,7 @@ int main(int argc, char **argv)
 
     Vector3d drift_p(0.0, 0.0, 0.0);
     Quaterniond drift_q(1.0, 0.0, 0.0, 0.0);
+    bool drift_initialized = false;
     mutex drift_mtx;
     auto applyDrift = [](const Vector3d &drift_p, const Quaterniond &drift_q,
                          Vector3d &odom_p, Quaterniond &odom_q)
@@ -310,29 +314,32 @@ int main(int argc, char **argv)
     ros::Publisher revised_odom_pub = nh.advertise<nav_msgs::Odometry>((string)param["revised_odom_topic"], 1000);
     auto odomCallback = [&](const nav_msgs::Odometry::ConstPtr &msg)
     {
-        Vector3d revised_odom_p(msg->pose.pose.position.x,
-                                msg->pose.pose.position.y,
-                                msg->pose.pose.position.z);
-        Quaterniond revised_odom_q(msg->pose.pose.orientation.w,
-                                   msg->pose.pose.orientation.x,
-                                   msg->pose.pose.orientation.y,
-                                   msg->pose.pose.orientation.z);
-
+        if (drift_initialized)
         {
-            lock_guard<mutex> lock(drift_mtx);
-            applyDrift(drift_p, drift_q, revised_odom_p, revised_odom_q);
+            Vector3d revised_odom_p(msg->pose.pose.position.x,
+                                    msg->pose.pose.position.y,
+                                    msg->pose.pose.position.z);
+            Quaterniond revised_odom_q(msg->pose.pose.orientation.w,
+                                       msg->pose.pose.orientation.x,
+                                       msg->pose.pose.orientation.y,
+                                       msg->pose.pose.orientation.z);
+
+            {
+                lock_guard<mutex> lock(drift_mtx);
+                applyDrift(drift_p, drift_q, revised_odom_p, revised_odom_q);
+            }
+
+            nav_msgs::Odometry revised_odom_msg(*msg);
+            revised_odom_msg.pose.pose.position.x = revised_odom_p.x();
+            revised_odom_msg.pose.pose.position.y = revised_odom_p.y();
+            revised_odom_msg.pose.pose.position.z = revised_odom_p.z();
+            revised_odom_msg.pose.pose.orientation.w = revised_odom_q.w();
+            revised_odom_msg.pose.pose.orientation.x = revised_odom_q.x();
+            revised_odom_msg.pose.pose.orientation.y = revised_odom_q.y();
+            revised_odom_msg.pose.pose.orientation.z = revised_odom_q.z();
+
+            revised_odom_pub.publish(revised_odom_msg);
         }
-
-        nav_msgs::Odometry revised_odom_msg(*msg);
-        revised_odom_msg.pose.pose.position.x = revised_odom_p.x();
-        revised_odom_msg.pose.pose.position.y = revised_odom_p.y();
-        revised_odom_msg.pose.pose.position.z = revised_odom_p.z();
-        revised_odom_msg.pose.pose.orientation.w = revised_odom_q.w();
-        revised_odom_msg.pose.pose.orientation.x = revised_odom_q.x();
-        revised_odom_msg.pose.pose.orientation.y = revised_odom_q.y();
-        revised_odom_msg.pose.pose.orientation.z = revised_odom_q.z();
-
-        revised_odom_pub.publish(revised_odom_msg);
     };
     ros::Subscriber odom_sub =
         nh.subscribe<nav_msgs::Odometry>((string)param["odom_topic"], 1000,
@@ -367,6 +374,15 @@ int main(int argc, char **argv)
         }
         CHECK(drone_id.find(self_id) != drone_id.end());
         int drone_num = drone_id.size();
+
+        map<int, bool> drift_initialized_;
+        for (auto id : drone_id)
+        {
+            if (is_lidar[id])
+                drift_initialized_[id] = true;
+            else
+                drift_initialized_[id] = false;
+        }
 
         set<int> uwb_anchor_id;
         map<int, Vector3d> uwb_anchor_position;
@@ -673,7 +689,7 @@ int main(int argc, char **argv)
                         }
                         // FIXME: swarm_dist_meas is not ordered in time #^#
                         if (fresh_dist_meas_ready)
-                            while (swarm_dist_meas.front().timestamp < swarm_dist_meas.back().timestamp - ros::Duration(sliding_window_length))
+                            while (swarm_dist_meas.front().timestamp < ros::Time::now() - ros::Duration(1.3 * sliding_window_length))
                                 swarm_dist_meas.pop_front();
                     }
 
@@ -740,6 +756,7 @@ int main(int argc, char **argv)
         bool optimize_yaw = (int)param["optimize_yaw"];
         double max_deanonymization_bearing_angle = (double)param["max_deanonymization_bearing_angle"] * 3.14159265358979323846 / 180.0;
         double huber_threshold = param["huber_threshold"];
+
         map<int, bool> inform_not_enough_dist_meas;
         for (auto id : drone_id)
             inform_not_enough_dist_meas[id] = true;
@@ -768,12 +785,14 @@ int main(int argc, char **argv)
                 for (const DistMeas &dist_meas : swarm_dist_meas)
                 {
                     // Keep sliding_window_length seconds measurements in the sliding window
-                    if (dist_meas.timestamp < swarm_dist_meas.back().timestamp - ros::Duration(sliding_window_length))
+                    if (dist_meas.timestamp < ros::Time::now() - ros::Duration(1.1 * sliding_window_length))
                         continue;
 
                     // Make sure we have enough measurements in the sliding window
                     if (dist_meas.timestamp < swarm_dist_meas.back().timestamp - ros::Duration(sliding_window_length * 0.5))
                     {
+                        drift_initialized_[dist_meas.jupiter.id] = true;
+                        drift_initialized_[dist_meas.ganymede.id] = true;
                         has_enough_dist_meas[dist_meas.jupiter.id] = true;
                         has_enough_dist_meas[dist_meas.ganymede.id] = true;
                         inform_not_enough_dist_meas[dist_meas.jupiter.id] = true;
@@ -908,7 +927,7 @@ int main(int argc, char **argv)
 
                     for (const DistMeas &dist_meas : swarm_dist_meas)
                     {
-                        if (dist_meas.timestamp < swarm_dist_meas.back().timestamp - ros::Duration(sliding_window_length))
+                        if (dist_meas.timestamp < ros::Time::now() - ros::Duration(1.1 * sliding_window_length))
                             continue;
 
                         Vector3d jupiter_p(dist_meas.jupiter.position);
@@ -1037,7 +1056,7 @@ int main(int argc, char **argv)
                 }
                 // FIXME: swarm_bearing_meas is not ordered in time #^#
                 if (fresh_bearing_meas_ready)
-                    while (swarm_bearing_meas.front().timestamp < swarm_bearing_meas.back().timestamp - ros::Duration(sliding_window_length))
+                    while (swarm_bearing_meas.front().timestamp < ros::Time::now() - ros::Duration(1.3 * sliding_window_length))
                         swarm_bearing_meas.pop_front();
             }
         };
@@ -1069,7 +1088,7 @@ int main(int argc, char **argv)
                     // TODO: add outlier detection here
 
                     // Keep sliding_window_length seconds measurements in the sliding window
-                    if (dist_meas.timestamp < swarm_dist_meas.back().timestamp - ros::Duration(sliding_window_length))
+                    if (dist_meas.timestamp < ros::Time::now() - ros::Duration(1.1 * sliding_window_length))
                         continue;
 
                     bool ganymede_is_uwb_anchor = uwb_anchor_id.find(dist_meas.ganymede.id) != uwb_anchor_id.end();
@@ -1116,7 +1135,7 @@ int main(int argc, char **argv)
                 for (const BearingMeas &bearing_meas : swarm_bearing_meas)
                 {
                     // Keep sliding_window_length seconds measurements in the sliding window
-                    if (bearing_meas.timestamp < swarm_bearing_meas.back().timestamp - ros::Duration(sliding_window_length))
+                    if (bearing_meas.timestamp < ros::Time::now() - ros::Duration(1.1 * sliding_window_length))
                         continue;
 
                     ceres::CostFunction *bearing_cost = BearingCostFunctor::Create(bearing_meas.jupiter.position,
@@ -1170,6 +1189,9 @@ int main(int argc, char **argv)
                 if (id == self_id)
                     continue;
 
+                if (!drift_initialized_[id])
+                    continue;
+
                 relative_loc::Drift drift_with_id;
                 drift_with_id.id = id;
                 drift_with_id.drift.header.stamp = ros::Time::now();
@@ -1185,6 +1207,7 @@ int main(int argc, char **argv)
                 drift_with_id.drift.pose.orientation.z = q.z();
 
                 swarm_drift_pub.publish(drift_with_id);
+                this_thread::sleep_for(chrono::milliseconds(1));
             }
         };
 
@@ -1219,8 +1242,12 @@ int main(int argc, char **argv)
                 {
                     lock_guard<mutex> lock1(drift_mtx);
                     lock_guard<mutex> lock2(swarm_drift_mtx);
-                    drift_p = swarm_drift[self_id].translation;
-                    drift_q = Quaterniond(AngleAxisd(swarm_drift[self_id].yaw, Vector3d::UnitZ()));
+                    if (drift_initialized_[self_id])
+                    {
+                        drift_p = swarm_drift[self_id].translation;
+                        drift_q = Quaterniond(AngleAxisd(swarm_drift[self_id].yaw, Vector3d::UnitZ()));
+                        drift_initialized = true;
+                    }
                 }
                 publishDrift();
                 swarm_drift_updated = false;
@@ -1247,6 +1274,7 @@ int main(int argc, char **argv)
                                   msg->drift.pose.orientation.x,
                                   msg->drift.pose.orientation.y,
                                   msg->drift.pose.orientation.z);
+            drift_initialized = true;
         };
         ros::Subscriber drift_sub =
             nh.subscribe<relative_loc::Drift>((string)param["drift_from_center_topic"], 10,
