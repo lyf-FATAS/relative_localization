@@ -1,0 +1,9 @@
+%YAML:1.0
+
+drone_id_and_odom_gt_topic:
+  - id: 0
+    odom_gt_topic: "/vrpn_client_node/HJY0/pose"
+    init_pos: [1.375, 0.0, 0.0]
+  - id: 3
+    odom_gt_topic: "/vrpn_client_node/HJY3/pose"
+    init_pos: [1.375, -1.375, 0.0]

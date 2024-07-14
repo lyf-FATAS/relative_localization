@@ -27,6 +27,7 @@ uwb_anchor_id_and_position:
 odom_topic: "/Odometry_map"
 revised_odom_topic: "revised_odom"
 swarm_odom_topic: "/others_odom"
+swarm_odom_gt_topic: "/others_odom_gt"
 swarm_odom_freq: 7.5
 distance_measurement_topic: "/distance_meas"
 distance_measurement_freq: 10.0
@@ -34,6 +35,7 @@ bearing_measurement_topic: "/bearing_meas"
 bearing_measurement_freq: 5.0
 drift_from_center_topic: "/drift_from_center"
 drift_to_edges_topic: "/drift_to_edges"
+drift_gt_topic: "/drift_gt"
 # Debug topics
 swarm_dist_est_topic: "/debug_distance_est"
 swarm_dist_meas_topic: "/debug_distance_meas"

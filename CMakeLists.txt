@@ -153,6 +153,7 @@ include_directories(
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 add_executable(${PROJECT_NAME}_node src/relative_loc_node.cpp)
+add_executable(odom_gt_aggregator src/odom_gt_aggregator.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -170,6 +171,10 @@ target_link_libraries(${PROJECT_NAME}_node
     ${OpenCV_LIBRARIES}
     ${CERES_LIBRARIES}
     ${glog_LIBRARIES}
+)
+target_link_libraries(odom_gt_aggregator
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBRARIES}
 )
 
 #############

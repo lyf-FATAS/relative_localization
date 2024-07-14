@@ -441,6 +441,103 @@ int main(int argc, char **argv)
                                              ros::VoidConstPtr(),
                                              ros::TransportHints().tcpNoDelay());
 
+        auto alignOdomAndOdomGtByTimestamp = [&swarm_odom_mtx, &swarm_odom_raw, swarm_odom_freq](const int id, const ros::Time &meas_timestamp, geometry_msgs::Pose &pose_from_odom)
+        {
+            lock_guard<mutex> lock(swarm_odom_mtx);
+
+            const deque<nav_msgs::Odometry> &odoms = swarm_odom_raw[id];
+            if (odoms.empty())
+            {
+                LOG(WARNING) << "No odom received from drone " << id << " #^#";
+                return false;
+            }
+
+            const double tolerance = 3.0 / swarm_odom_freq; // 3 odom periods
+            if (meas_timestamp < odoms.front().header.stamp - ros::Duration(tolerance) ||
+                meas_timestamp > odoms.back().header.stamp + ros::Duration(tolerance))
+            {
+                LOG(ERROR) << ((meas_timestamp > odoms.back().header.stamp + ros::Duration(tolerance)) ? "Drone " + to_string(id) + "'s odom gt time >> lastest odom time (" + to_string((meas_timestamp - odoms.back().header.stamp).toSec()) + "s) #^#" : "Drone " + to_string(id) + "'s odom gt time << earliest odom time (" + to_string((odoms.front().header.stamp - meas_timestamp).toSec()) + "s) #^#");
+                return false;
+            }
+
+            // Find the closest odom by iterating from the end
+            auto closest_it = odoms.rbegin();
+            double closest_diff = numeric_limits<double>::infinity();
+
+            for (auto it = odoms.rbegin(); it != odoms.rend(); ++it)
+            {
+                double diff = abs((meas_timestamp - it->header.stamp).toSec());
+                if (diff < closest_diff)
+                {
+                    closest_diff = diff;
+                    closest_it = it;
+                }
+                else
+                {
+                    // Since the deque is ordered, we can break early if the difference starts increasing
+                    break;
+                }
+            }
+            if (closest_diff > 2.0 / swarm_odom_freq) // 2 odom periods
+                LOG(WARNING) << "Distance from odom gt to drone " << id << "'s nearest odom is " << closest_diff << "s";
+
+            pose_from_odom = (*closest_it).pose.pose;
+            return true;
+        };
+        ros::Publisher swarm_drift_gt_pub = nh.advertise<relative_loc::Drift>((string)param["drift_gt_topic"], 1000);
+        auto swarmOdomGtCallback = [&](const nav_msgs::Odometry::ConstPtr &msg)
+        {
+            CHECK_EQ(msg->child_frame_id.substr(0, 6), "drone_");
+
+            int id = atoi(msg->child_frame_id.substr(6, 10).c_str());
+            CHECK(drone_id.find(id) != drone_id.end()) << "Drone " << id << " is not in the swarm #^#";
+            if (abs((msg->header.stamp - ros::Time::now()).toSec()) > 1.0)
+                LOG(ERROR) << "Timestamp of a groundtruth odom from drone " << id << " is more than 1.0s later (or earlier) than current time @_@";
+
+            Vector3d odom_gt_p(msg->pose.pose.position.x,
+                               msg->pose.pose.position.y,
+                               msg->pose.pose.position.z);
+            Quaterniond odom_gt_q(msg->pose.pose.orientation.w,
+                                  msg->pose.pose.orientation.x,
+                                  msg->pose.pose.orientation.y,
+                                  msg->pose.pose.orientation.z);
+
+            geometry_msgs::Pose odom;
+            bool odom_found = alignOdomAndOdomGtByTimestamp(id, msg->header.stamp, odom);
+            if (odom_found)
+            {
+                Vector3d odom_p(odom.position.x,
+                                odom.position.y,
+                                odom.position.z);
+                Quaterniond odom_q(odom.orientation.w,
+                                   odom.orientation.x,
+                                   odom.orientation.y,
+                                   odom.orientation.z);
+
+                Quaterniond drift_gt_q = odom_gt_q * odom_q.inverse();
+                Vector3d drift_gt_p = odom_gt_p - drift_gt_q * odom_p;
+
+                relative_loc::Drift drift_gt_msg;
+                drift_gt_msg.id = id;
+                drift_gt_msg.drift.header.stamp = msg->header.stamp;
+
+                drift_gt_msg.drift.pose.position.x = drift_gt_p.x();
+                drift_gt_msg.drift.pose.position.y = drift_gt_p.y();
+                drift_gt_msg.drift.pose.position.z = drift_gt_p.z();
+                drift_gt_msg.drift.pose.orientation.w = drift_gt_q.w();
+                drift_gt_msg.drift.pose.orientation.x = drift_gt_q.x();
+                drift_gt_msg.drift.pose.orientation.y = drift_gt_q.y();
+                drift_gt_msg.drift.pose.orientation.z = drift_gt_q.z();
+
+                swarm_drift_gt_pub.publish(drift_gt_msg);
+            }
+        };
+        ros::Subscriber swarm_odom_gt_sub =
+            nh.subscribe<nav_msgs::Odometry>((string)param["swarm_odom_gt_topic"], 1000,
+                                             swarmOdomGtCallback,
+                                             ros::VoidConstPtr(),
+                                             ros::TransportHints().tcpNoDelay());
+
         double dist_meas_freq = param["distance_measurement_freq"];
         map<int, deque<relative_loc::DistanceMeas>> swarm_dist_meas_raw;
         auto distanceCallback = [&](const relative_loc::DistanceMeas::ConstPtr &msg)
