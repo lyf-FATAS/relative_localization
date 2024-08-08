@@ -14,12 +14,15 @@ struct DroneInfo
     geometry_msgs::Point offset;
 };
 
+double publish_interval;
 std::vector<DroneInfo> readYaml(const std::string &filename)
 {
     std::vector<DroneInfo> drone_info_list;
     cv::FileStorage fs(filename, cv::FileStorage::READ);
 
-    cv::FileNode drone_info_node = fs["drone_id_and_odom_gt_topic"];
+    publish_interval = fs["odom_gt_publish_interval"];
+
+    cv::FileNode drone_info_node = fs["vision_drone_id_and_odom_gt_topic"];
     for (cv::FileNodeIterator it = drone_info_node.begin(); it != drone_info_node.end(); ++it)
     {
         DroneInfo info;
@@ -38,7 +41,6 @@ std::vector<DroneInfo> readYaml(const std::string &filename)
 
 ros::Publisher pub;
 std::unordered_map<std::string, ros::Time> last_publish_time_map;
-double publish_interval = 0.08; // 10Hz
 std::unordered_map<std::string, int> topic_to_id_map;
 std::unordered_map<std::string, bool> topic_to_initialized_map;
 std::unordered_map<std::string, geometry_msgs::Point> topic_to_first_odom_pos_map;

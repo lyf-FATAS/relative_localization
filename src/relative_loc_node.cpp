@@ -432,7 +432,7 @@ int main(int argc, char **argv)
 
             swarm_odom_raw[id].push_back(*msg);
 
-            if (swarm_odom_raw[id].size() > sliding_window_length * swarm_odom_freq)
+            if (swarm_odom_raw[id].size() > 5.20 * sliding_window_length * swarm_odom_freq)
                 swarm_odom_raw[id].pop_front();
         };
         ros::Subscriber swarm_odom_sub =
@@ -456,7 +456,7 @@ int main(int argc, char **argv)
             if (meas_timestamp < odoms.front().header.stamp - ros::Duration(tolerance) ||
                 meas_timestamp > odoms.back().header.stamp + ros::Duration(tolerance))
             {
-                LOG(ERROR) << ((meas_timestamp > odoms.back().header.stamp + ros::Duration(tolerance)) ? "Drone " + to_string(id) + "'s odom gt time >> lastest odom time (" + to_string((meas_timestamp - odoms.back().header.stamp).toSec()) + "s) #^#" : "Drone " + to_string(id) + "'s odom gt time << earliest odom time (" + to_string((odoms.front().header.stamp - meas_timestamp).toSec()) + "s) #^#");
+                LOG(ERROR) << ((meas_timestamp > odoms.back().header.stamp + ros::Duration(tolerance)) ? "Drone " + to_string(id) + "'s odom gt time >>> lastest odom time (" + to_string((meas_timestamp - odoms.back().header.stamp).toSec()) + "s) #^#" : "Drone " + to_string(id) + "'s odom gt time <<< earliest odom time (" + to_string((odoms.front().header.stamp - meas_timestamp).toSec()) + "s) #^#");
                 return false;
             }
 
@@ -515,7 +515,8 @@ int main(int argc, char **argv)
                                    odom.orientation.z);
 
                 Quaterniond drift_gt_q = odom_gt_q * odom_q.inverse();
-                Vector3d drift_gt_p = odom_gt_p - drift_gt_q * odom_p;
+                // Vector3d drift_gt_p = odom_gt_p - drift_gt_q * odom_p;
+                Vector3d drift_gt_p = odom_gt_p - odom_p;
 
                 relative_loc::Drift drift_gt_msg;
                 drift_gt_msg.id = id;
@@ -552,7 +553,7 @@ int main(int argc, char **argv)
 
             swarm_dist_meas_raw[id].push_back(*msg);
 
-            if (swarm_dist_meas_raw[id].size() > sliding_window_length * dist_meas_freq)
+            if (swarm_dist_meas_raw[id].size() > 5.20 * sliding_window_length * dist_meas_freq)
                 swarm_dist_meas_raw[id].pop_front();
         };
         ros::Subscriber distance_sub =
@@ -561,6 +562,7 @@ int main(int argc, char **argv)
                                                      ros::VoidConstPtr(),
                                                      ros::TransportHints().tcpNoDelay());
 
+        atomic<bool> enable_bearing((int)param["enable_bearing"]); // FIXME: a lot of implicit conversions in this code #^#
         double bearing_meas_freq = param["bearing_measurement_freq"];
         map<int, deque<relative_loc::AnonymousBearingMeas>> swarm_anonymous_bearing_meas_raw;
         auto bearingCallback = [&](const relative_loc::AnonymousBearingMeas::ConstPtr &msg)
@@ -573,16 +575,18 @@ int main(int argc, char **argv)
 
             swarm_anonymous_bearing_meas_raw[msg->id].push_back(*msg);
 
-            if (swarm_anonymous_bearing_meas_raw[msg->id].size() > sliding_window_length * bearing_meas_freq)
+            if (swarm_anonymous_bearing_meas_raw[msg->id].size() > 5.20 * sliding_window_length * bearing_meas_freq)
                 swarm_anonymous_bearing_meas_raw[msg->id].pop_front();
         };
-        ros::Subscriber bearing_sub =
-            nh.subscribe<relative_loc::AnonymousBearingMeas>((string)param["bearing_measurement_topic"], 1000,
-                                                             bearingCallback,
-                                                             ros::VoidConstPtr(),
-                                                             ros::TransportHints().tcpNoDelay());
+        ros::Subscriber bearing_sub;
+        if (enable_bearing)
+            bearing_sub =
+                nh.subscribe<relative_loc::AnonymousBearingMeas>((string)param["bearing_measurement_topic"], 1000,
+                                                                 bearingCallback,
+                                                                 ros::VoidConstPtr(),
+                                                                 ros::TransportHints().tcpNoDelay());
 
-        ros::AsyncSpinner spinner(4);
+        ros::AsyncSpinner spinner(5);
         spinner.start();
 
         map<int, Drift> swarm_drift; // Decision variable
@@ -602,8 +606,8 @@ int main(int argc, char **argv)
         bool custom_debug_output = (int)param["custom_debug_output"];
         deque<DistMeas> swarm_dist_meas;
         deque<AnonymousBearingMeas> swarm_anonymous_bearing_meas;
-        atomic<bool> fresh_dist_meas_ready{false};
-        atomic<bool> fresh_anonymous_bearing_meas_ready{false};
+        atomic<bool> fresh_dist_meas_ready(false);
+        atomic<bool> fresh_anonymous_bearing_meas_ready(false);
         map<int, bool> inform_no_odom;
         for (auto id : drone_id)
             inform_no_odom[id] = true;
@@ -663,8 +667,7 @@ int main(int argc, char **argv)
                 while (ros::ok())
                 {
                     { // Align distance measurements with odom
-                        lock_guard<mutex> lock1(dist_meas_raw_mtx);
-                        lock_guard<mutex> lock2(dist_meas_mtx);
+                        lock_guard<mutex> lock(dist_meas_raw_mtx);
                         for (auto &[jupiter_id, jupiters] : swarm_dist_meas_raw)
                         {
                             while (!jupiters.empty())
@@ -733,8 +736,11 @@ int main(int argc, char **argv)
                                     dist_meas.ganymede = ganymede;
                                     dist_meas.distance = distance;
 
-                                    swarm_dist_meas.push_back(dist_meas);
-                                    // TODO: a lot of copy so far #^# Try to use move instead
+                                    {
+                                        lock_guard<mutex> lock(dist_meas_mtx);
+                                        swarm_dist_meas.push_back(dist_meas);
+                                        // TODO: a lot of copy so far #^# Try to use move instead
+                                    }
 
                                     fresh_dist_meas_ready = true;
 
@@ -755,7 +761,7 @@ int main(int argc, char **argv)
                                         dist_est_msg.data = (j_p - g_p).norm();
                                         swarm_dist_est_pub.publish(dist_est_msg);
 
-                                        if (abs(dist_est_msg.data - distance) < 2.5)
+                                        if (abs(dist_est_msg.data - distance) < 25.0)
                                         {
                                             std_msgs::Float32 dist_meas_msg;
                                             dist_meas_msg.data = distance;
@@ -784,15 +790,18 @@ int main(int argc, char **argv)
                                 jupiters.pop_front();
                             }
                         }
+
                         // FIXME: swarm_dist_meas is not ordered in time #^#
-                        if (fresh_dist_meas_ready)
-                            while (swarm_dist_meas.front().timestamp < ros::Time::now() - ros::Duration(1.3 * sliding_window_length))
+                        {
+                            lock_guard<mutex> lock(dist_meas_mtx);
+                            while (!swarm_dist_meas.empty() && swarm_dist_meas.front().timestamp < ros::Time::now() - ros::Duration(sliding_window_length))
                                 swarm_dist_meas.pop_front();
+                        }
                     }
 
+                    if (enable_bearing)
                     { // Align anonymous bearing measurements with odom
-                        lock_guard<mutex> lock1(anonymous_bearing_meas_raw_mtx);
-                        lock_guard<mutex> lock2(anonymous_bearing_meas_mtx);
+                        lock_guard<mutex> lock(anonymous_bearing_meas_raw_mtx);
                         for (auto &[jupiter_id, jupiters] : swarm_anonymous_bearing_meas_raw)
                         {
                             while (!jupiters.empty())
@@ -829,8 +838,11 @@ int main(int argc, char **argv)
                                 bearing_meas.jupiter = jupiter;
                                 bearing_meas.bearing = bearing;
 
-                                swarm_anonymous_bearing_meas.push_back(bearing_meas);
-                                // TODO: a lot of copy so far #^# Use move instead
+                                {
+                                    lock_guard<mutex> lock(anonymous_bearing_meas_mtx);
+                                    swarm_anonymous_bearing_meas.push_back(bearing_meas);
+                                    // TODO: a lot of copy so far #^# Use move instead
+                                }
 
                                 fresh_anonymous_bearing_meas_ready = true;
                                 jupiters.pop_front();
@@ -862,9 +874,25 @@ int main(int argc, char **argv)
         {
             ceres::Problem problem;
 
+            lock_guard<mutex> lock(swarm_drift_mtx);
+
             { // Distance measurement cost
-                lock_guard<mutex> lock1(dist_meas_mtx);
-                lock_guard<mutex> lock2(swarm_drift_mtx);
+                lock_guard<mutex> lock(dist_meas_mtx);
+
+                // Regularization cost: keep the drift close to initial value
+                int N_dist_meas = swarm_dist_meas.size();
+                for (auto &[id, drift] : swarm_drift)
+                {
+                    ceres::CostFunction *regularization_cost = RegularizationCostFunctor::Create(drift.translation,
+                                                                                                 drift.yaw,
+                                                                                                 N_dist_meas * prior_cost_weight,
+                                                                                                 N_dist_meas * regularization_cost_weight,
+                                                                                                 optimize_z,
+                                                                                                 optimize_yaw);
+
+                    problem.AddResidualBlock(regularization_cost, nullptr,
+                                             drift.translation.data(), &drift.yaw);
+                }
 
                 map<int, bool> has_enough_dist_meas;
                 for (auto id : drone_id)
@@ -882,10 +910,10 @@ int main(int argc, char **argv)
                 for (const DistMeas &dist_meas : swarm_dist_meas)
                 {
                     // Keep sliding_window_length seconds measurements in the sliding window
-                    if (dist_meas.timestamp < ros::Time::now() - ros::Duration(1.1 * sliding_window_length))
+                    if (dist_meas.timestamp < ros::Time::now() - ros::Duration(sliding_window_length))
                         continue;
 
-                    // Make sure we have enough measurements in the sliding window
+                    // FIXME: improve the condition for ensuring sufficient measurements in the sliding window
                     if (dist_meas.timestamp < swarm_dist_meas.back().timestamp - ros::Duration(sliding_window_length * 0.5))
                     {
                         drift_initialized_[dist_meas.jupiter.id] = true;
@@ -911,7 +939,7 @@ int main(int argc, char **argv)
                     total_err_before_opt += err;
                     err_before_opt.push_back(err);
 
-                    // FIXME: Enhance outlier detection
+                    // FIXME: enhance outlier detection
                     if (abs(dist_meas.distance - (jupiter_p - ganymede_p).norm()) > distance_outlier_thr)
                     {
                         N_outliers++;
@@ -956,21 +984,6 @@ int main(int argc, char **argv)
                                                  jupiter_drift.translation.data(), &jupiter_drift.yaw,
                                                  ganymede_drift.translation.data(), &ganymede_drift.yaw);
                     }
-                }
-
-                // Regularization cost: keep the drift close to initial value
-                int N_dist_meas = swarm_dist_meas.size();
-                for (auto &[id, drift] : swarm_drift)
-                {
-                    ceres::CostFunction *regularization_cost = RegularizationCostFunctor::Create(drift.translation,
-                                                                                                 drift.yaw,
-                                                                                                 N_dist_meas * prior_cost_weight,
-                                                                                                 N_dist_meas * regularization_cost_weight,
-                                                                                                 optimize_z,
-                                                                                                 optimize_yaw);
-
-                    problem.AddResidualBlock(regularization_cost, nullptr,
-                                             drift.translation.data(), &drift.yaw);
                 }
 
                 for (auto &[id, ready_for_opt] : has_enough_dist_meas)
@@ -1024,7 +1037,7 @@ int main(int argc, char **argv)
 
                     for (const DistMeas &dist_meas : swarm_dist_meas)
                     {
-                        if (dist_meas.timestamp < ros::Time::now() - ros::Duration(1.1 * sliding_window_length))
+                        if (dist_meas.timestamp < ros::Time::now() - ros::Duration(sliding_window_length))
                             continue;
 
                         Vector3d jupiter_p(dist_meas.jupiter.position);
@@ -1076,86 +1089,103 @@ int main(int argc, char **argv)
 
         deque<BearingMeas> swarm_bearing_meas;
         atomic<bool> fresh_bearing_meas_ready{false};
+        ros::Publisher swarm_bearing_diff_pub = nh.advertise<std_msgs::Float32>((string)param["swarm_bearing_diff_topic"], 1000);
+        ros::Publisher swarm_bearing_diff_before_opt_pub = nh.advertise<std_msgs::Float32>((string)param["swarm_bearing_diff_before_opt_topic"], 1000);
         auto deanonymizeBearingMeas = [&]()
         {
+            lock_guard<mutex> lock1(anonymous_bearing_meas_mtx);
+            lock_guard<mutex> lock2(bearing_meas_mtx);
+            lock_guard<mutex> lock3(swarm_drift_mtx);
+            while (!swarm_anonymous_bearing_meas.empty())
             {
-                lock_guard<mutex> lock1(anonymous_bearing_meas_mtx);
-                lock_guard<mutex> lock2(bearing_meas_mtx);
-                lock_guard<mutex> lock3(swarm_drift_mtx);
-                while (!swarm_anonymous_bearing_meas.empty())
+                const AnonymousBearingMeas &anonymous_bearing_meas = swarm_anonymous_bearing_meas.front();
+
+                int jupiter_id = anonymous_bearing_meas.jupiter.id;
+                CHECK(drone_id.find(jupiter_id) != drone_id.end());
+
+                ros::Time jupiter_time = anonymous_bearing_meas.timestamp;
+
+                Vector3d jupiter_p = anonymous_bearing_meas.jupiter.position;
+                Quaterniond jupiter_q = anonymous_bearing_meas.jupiter.orientation;
+                Vector3d jupiter_p_raw(jupiter_p);
+                Quaterniond jupiter_q_raw(jupiter_q);
+                applyDrift(swarm_drift[jupiter_id], jupiter_p, jupiter_q);
+
+                Vector3d bearing = anonymous_bearing_meas.bearing;
+                CHECK_DOUBLE_EQ(bearing.norm(), 1.0);
+
+                Ganymede ganymede;
+                double closest_diff = numeric_limits<double>::infinity();
+                double closest_diff_raw = numeric_limits<double>::infinity();
+
+                for (int ganymede_id : drone_id)
                 {
-                    const AnonymousBearingMeas &anonymous_bearing_meas = swarm_anonymous_bearing_meas.front();
+                    if (ganymede_id == jupiter_id)
+                        continue;
 
-                    int jupiter_id = anonymous_bearing_meas.jupiter.id;
-                    CHECK(drone_id.find(jupiter_id) != drone_id.end());
+                    ros::Time ganymede_time = jupiter_time;
+                    geometry_msgs::Pose pose_from_odom;
+                    bool ganymede_odom_found = alignMeasAndOdomByTimestamp(ganymede_id, ganymede_time, pose_from_odom);
+                    if (!ganymede_odom_found)
+                        continue;
 
-                    ros::Time jupiter_time = anonymous_bearing_meas.timestamp;
+                    Vector3d ganymede_p(pose_from_odom.position.x,
+                                        pose_from_odom.position.y,
+                                        pose_from_odom.position.z);
+                    Quaterniond ganymede_q(pose_from_odom.orientation.w,
+                                           pose_from_odom.orientation.x,
+                                           pose_from_odom.orientation.y,
+                                           pose_from_odom.orientation.z);
+                    Vector3d ganymede_p_raw(ganymede_p);
+                    Quaterniond ganymede_q_raw(ganymede_q);
+                    applyDrift(swarm_drift[ganymede_id], ganymede_p, ganymede_q);
 
-                    Vector3d jupiter_p = anonymous_bearing_meas.jupiter.position;
-                    Quaterniond jupiter_q = anonymous_bearing_meas.jupiter.orientation;
-                    applyDrift(swarm_drift[jupiter_id], jupiter_p, jupiter_q);
+                    Vector3d bearing_from_odom = (jupiter_q.inverse() * (ganymede_p - jupiter_p)).normalized();
+                    Vector3d bearing_from_odom_raw = (jupiter_q_raw.inverse() * (ganymede_p_raw - jupiter_p_raw)).normalized();
 
-                    Vector3d bearing = anonymous_bearing_meas.bearing;
-                    CHECK_DOUBLE_EQ(bearing.norm(), 1.0);
-
-                    Ganymede ganymede;
-                    double closest_diff = numeric_limits<double>::infinity();
-
-                    for (int ganymede_id : drone_id)
+                    double diff = acos(clamp(bearing.dot(bearing_from_odom), -1.0, 1.0));
+                    double diff_raw = acos(clamp(bearing.dot(bearing_from_odom_raw), -1.0, 1.0));
+                    if (diff < closest_diff)
                     {
-                        if (ganymede_id == jupiter_id)
-                            continue;
-
-                        ros::Time ganymede_time = jupiter_time;
-                        geometry_msgs::Pose pose_from_odom;
-                        bool ganymede_odom_found = alignMeasAndOdomByTimestamp(ganymede_id, ganymede_time, pose_from_odom);
-                        if (!ganymede_odom_found)
-                            continue;
-
-                        Vector3d ganymede_p(pose_from_odom.position.x,
-                                            pose_from_odom.position.y,
-                                            pose_from_odom.position.z);
-                        Quaterniond ganymede_q(pose_from_odom.orientation.w,
-                                               pose_from_odom.orientation.x,
-                                               pose_from_odom.orientation.y,
-                                               pose_from_odom.orientation.z);
-                        applyDrift(swarm_drift[ganymede_id], ganymede_p, ganymede_q);
-
-                        Vector3d bearing_from_odom = (jupiter_q.inverse() * (ganymede_p - jupiter_p)).normalized();
-
-                        double diff = acos(clamp(bearing.dot(bearing_from_odom), -1.0, 1.0));
-                        if (diff < closest_diff)
-                        {
-                            closest_diff = diff;
-                            ganymede.id = ganymede_id;
-                            ganymede.position = ganymede_p;
-                            ganymede.orientation = ganymede_q;
-                        }
+                        closest_diff = diff;
+                        closest_diff_raw = diff_raw;
+                        ganymede.id = ganymede_id;
+                        ganymede.position = ganymede_p;
+                        ganymede.orientation = ganymede_q;
                     }
-
-                    if (closest_diff < max_deanonymization_bearing_angle)
-                    {
-                        BearingMeas bearing_meas;
-                        bearing_meas.timestamp = jupiter_time;
-                        bearing_meas.jupiter = anonymous_bearing_meas.jupiter;
-                        bearing_meas.ganymede = ganymede;
-                        bearing_meas.bearing = bearing;
-
-                        swarm_bearing_meas.push_back(bearing_meas);
-
-                        fresh_bearing_meas_ready = true;
-                    }
-                    else
-                    {
-                        LOG(ERROR) << "Deanonymization failed (closest_diff = " << closest_diff * 180.0 / 3.14159265358979323846 << " deg) for an anonymous bearing measurement from drone " << jupiter_id << " #^#";
-                    }
-                    swarm_anonymous_bearing_meas.pop_front();
                 }
-                // FIXME: swarm_bearing_meas is not ordered in time #^#
-                if (fresh_bearing_meas_ready)
-                    while (swarm_bearing_meas.front().timestamp < ros::Time::now() - ros::Duration(1.3 * sliding_window_length))
-                        swarm_bearing_meas.pop_front();
+
+                if (closest_diff < max_deanonymization_bearing_angle)
+                {
+                    BearingMeas bearing_meas;
+                    bearing_meas.timestamp = jupiter_time;
+                    bearing_meas.jupiter = anonymous_bearing_meas.jupiter;
+                    bearing_meas.ganymede = ganymede;
+                    bearing_meas.bearing = bearing;
+
+                    swarm_bearing_meas.push_back(bearing_meas);
+
+                    fresh_bearing_meas_ready = true;
+
+                    if (publish_debug_topics)
+                    {
+                        std_msgs::Float32 bearing_diff_msg, bearing_diff_before_opt_msg;
+                        bearing_diff_msg.data = closest_diff * 180.0 / 3.14159265358979323846;
+                        bearing_diff_before_opt_msg.data = closest_diff_raw * 180.0 / 3.14159265358979323846;
+                        swarm_bearing_diff_pub.publish(bearing_diff_msg);
+                        swarm_bearing_diff_before_opt_pub.publish(bearing_diff_before_opt_msg);
+                        this_thread::sleep_for(chrono::milliseconds(1));
+                    }
+                }
+                else
+                {
+                    LOG(ERROR) << "Deanonymization failed (closest_diff = " << closest_diff * 180.0 / 3.14159265358979323846 << " deg) for an anonymous bearing measurement from drone " << jupiter_id << " #^#";
+                }
+                swarm_anonymous_bearing_meas.pop_front();
             }
+            // FIXME: swarm_bearing_meas is not ordered in time #^#
+            while (!swarm_bearing_meas.empty() && swarm_bearing_meas.front().timestamp < ros::Time::now() - ros::Duration(sliding_window_length))
+                swarm_bearing_meas.pop_front();
         };
 
         auto optimizeOverBearingMeas = [&]()
@@ -1164,29 +1194,56 @@ int main(int argc, char **argv)
 
             lock_guard<mutex> lock(swarm_drift_mtx);
 
-            // Regularization cost: keep the drift close to initial value
-            for (auto &[id, drift] : swarm_drift)
-            {
-                ceres::CostFunction *regularization_cost = RegularizationCostFunctor::Create(drift.translation,
-                                                                                             drift.yaw,
-                                                                                             prior_cost_weight,
-                                                                                             regularization_cost_weight,
-                                                                                             optimize_z,
-                                                                                             optimize_yaw);
-
-                problem.AddResidualBlock(regularization_cost, nullptr,
-                                         drift.translation.data(), &drift.yaw);
-            }
-
             { // Distance measurement cost
                 lock_guard<mutex> lock(dist_meas_mtx);
+
+                // Regularization cost: keep the drift close to initial value
+                int N_dist_meas = swarm_dist_meas.size();
+                for (auto &[id, drift] : swarm_drift)
+                {
+                    ceres::CostFunction *regularization_cost = RegularizationCostFunctor::Create(drift.translation,
+                                                                                                 drift.yaw,
+                                                                                                 N_dist_meas * prior_cost_weight,
+                                                                                                 N_dist_meas * regularization_cost_weight,
+                                                                                                 optimize_z,
+                                                                                                 optimize_yaw);
+
+                    problem.AddResidualBlock(regularization_cost, nullptr,
+                                             drift.translation.data(), &drift.yaw);
+                }
+
+                map<int, bool> has_enough_dist_meas;
+                for (auto id : drone_id)
+                    has_enough_dist_meas[id] = false;
+
                 for (const DistMeas &dist_meas : swarm_dist_meas)
                 {
-                    // TODO: add outlier detection here
-
                     // Keep sliding_window_length seconds measurements in the sliding window
-                    if (dist_meas.timestamp < ros::Time::now() - ros::Duration(1.1 * sliding_window_length))
+                    if (dist_meas.timestamp < ros::Time::now() - ros::Duration(sliding_window_length))
                         continue;
+
+                    // FIXME: improve the condition for ensuring sufficient measurements in the sliding window
+                    if (dist_meas.timestamp < swarm_dist_meas.back().timestamp - ros::Duration(sliding_window_length * 0.5))
+                    {
+                        drift_initialized_[dist_meas.jupiter.id] = true;
+                        drift_initialized_[dist_meas.ganymede.id] = true;
+                        has_enough_dist_meas[dist_meas.jupiter.id] = true;
+                        has_enough_dist_meas[dist_meas.ganymede.id] = true;
+                        inform_not_enough_dist_meas[dist_meas.jupiter.id] = true;
+                        inform_not_enough_dist_meas[dist_meas.ganymede.id] = true;
+                    }
+
+                    Vector3d jupiter_p(dist_meas.jupiter.position);
+                    Quaterniond jupiter_q(dist_meas.jupiter.orientation);
+                    Vector3d ganymede_p(dist_meas.ganymede.position);
+                    Quaterniond ganymede_q(dist_meas.ganymede.orientation);
+                    applyDrift(swarm_drift[dist_meas.jupiter.id], jupiter_p, jupiter_q);
+                    applyDrift(swarm_drift[dist_meas.ganymede.id], ganymede_p, ganymede_q);
+                    // FIXME: enhance outlier detection
+                    if (abs(dist_meas.distance - (jupiter_p - ganymede_p).norm()) > distance_outlier_thr)
+                    {
+                        continue;
+                    }
 
                     bool ganymede_is_uwb_anchor = uwb_anchor_id.find(dist_meas.ganymede.id) != uwb_anchor_id.end();
                     if (ganymede_is_uwb_anchor)
@@ -1225,6 +1282,21 @@ int main(int argc, char **argv)
                                                  ganymede_drift.translation.data(), &ganymede_drift.yaw);
                     }
                 }
+
+                for (auto &[id, ready_for_opt] : has_enough_dist_meas)
+                {
+                    if (!ready_for_opt)
+                    {
+                        Drift &drift = swarm_drift[id];
+                        problem.SetParameterBlockConstant(drift.translation.data());
+                        problem.SetParameterBlockConstant(&drift.yaw);
+                        if (inform_not_enough_dist_meas[id])
+                        {
+                            LOG(WARNING) << "Not enough distance measurements associated with drone " << id << ", fixing its drift @_@";
+                            inform_not_enough_dist_meas[id] = false;
+                        }
+                    }
+                }
             }
 
             { // Bearing measurement cost
@@ -1232,7 +1304,7 @@ int main(int argc, char **argv)
                 for (const BearingMeas &bearing_meas : swarm_bearing_meas)
                 {
                     // Keep sliding_window_length seconds measurements in the sliding window
-                    if (bearing_meas.timestamp < ros::Time::now() - ros::Duration(1.1 * sliding_window_length))
+                    if (bearing_meas.timestamp < ros::Time::now() - ros::Duration(sliding_window_length))
                         continue;
 
                     ceres::CostFunction *bearing_cost = BearingCostFunctor::Create(bearing_meas.jupiter.position,
@@ -1310,31 +1382,19 @@ int main(int argc, char **argv)
 
         int optimize_per_N_meas = param["optimize_per_N_meas"];
         ros::Rate optimizaion_rate(max({swarm_odom_freq, dist_meas_freq, bearing_meas_freq}) / optimize_per_N_meas);
-        bool swarm_drift_updated = false;
         while (ros::ok())
         {
             if (fresh_dist_meas_ready)
             {
-                optimizeOverDistanceMeas();
-                fresh_dist_meas_ready = false;
-                swarm_drift_updated = true;
-            }
-
-            if (fresh_anonymous_bearing_meas_ready)
-            {
-                deanonymizeBearingMeas();
-                fresh_anonymous_bearing_meas_ready = false;
-
-                if (fresh_bearing_meas_ready)
+                if (enable_bearing)
                 {
+                    deanonymizeBearingMeas();
                     optimizeOverBearingMeas();
-                    fresh_bearing_meas_ready = false;
-                    swarm_drift_updated = true;
                 }
-            }
+                else
+                    optimizeOverDistanceMeas();
+                fresh_dist_meas_ready = false;
 
-            if (swarm_drift_updated)
-            {
                 // Send latest estimated drift to all drones
                 {
                     lock_guard<mutex> lock1(drift_mtx);
@@ -1347,7 +1407,6 @@ int main(int argc, char **argv)
                     }
                 }
                 publishDrift();
-                swarm_drift_updated = false;
             }
 
             optimizaion_rate.sleep();

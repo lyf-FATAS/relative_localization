@@ -154,6 +154,7 @@ include_directories(
 ## The recommended prefix ensures that target names across packages don't collide
 add_executable(${PROJECT_NAME}_node src/relative_loc_node.cpp)
 add_executable(odom_gt_aggregator src/odom_gt_aggregator.cpp)
+add_executable(fake_bearing_generator src/fake_bearing_generator.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -164,6 +165,7 @@ add_executable(odom_gt_aggregator src/odom_gt_aggregator.cpp)
 ## Add cmake target dependencies of the executable
 ## same as for the library above
 add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(fake_bearing_generator ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(${PROJECT_NAME}_node
@@ -175,6 +177,11 @@ target_link_libraries(${PROJECT_NAME}_node
 target_link_libraries(odom_gt_aggregator
     ${catkin_LIBRARIES}
     ${OpenCV_LIBRARIES}
+)
+target_link_libraries(fake_bearing_generator
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBRARIES}
+    ${glog_LIBRARIES}
 )
 
 #############
