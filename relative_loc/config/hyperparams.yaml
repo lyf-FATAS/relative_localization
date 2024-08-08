@@ -2,13 +2,10 @@
 
 drone_id_and_uwb_ext:
   - id: 0
-    is_lidar: 0
-    uwb_ext: [0.0, 0.0, 0.0]
-  - id: 5
-    is_lidar: 0
-    uwb_ext: [0.0, 0.0, 0.0]
-  - id: 6
     is_lidar: 1
+    uwb_ext: [0.0, 0.0, 0.0]
+  - id: 1
+    is_lidar: 0
     uwb_ext: [0.0, 0.0, 0.0]
 uwb_bias: 0.25
 consider_uwb_extrinsic: 0
@@ -18,21 +15,20 @@ uwb_anchor_id_and_position:
   - id: 52
     position: [52.0, 52.0, 52.0]
 
-odom_topic: "/odom_fusion/odom"
 revised_odom_topic: "revised_odom"
 
-swarm_odom_topic: "/others_odom"
+swarm_odom_topic: "/bridge/broadcast_odom_from_planner"
 swarm_odom_gt_topic: "/others_odom_gt"
 swarm_odom_freq: 3.0
 
-distance_measurement_topic: "/distance_meas"
+distance_measurement_topic: "/bridge/distance_meas"
 distance_measurement_freq: 3.0
 
 enable_bearing: 1
-bearing_measurement_topic: "/bearing_meas"
+bearing_measurement_topic: "/bridge/bearing_meas"
 bearing_measurement_freq: 2.0
 
-drift_from_center_topic: "/drift_from_center"
+drift_from_center_topic: "/bridge/drift_to_edges"
 drift_to_edges_topic: "/drift_to_edges"
 drift_gt_topic: "/drift_gt"
 
@@ -48,7 +44,7 @@ sliding_window_length: 2                   # In seconds
 optimize_per_N_meas: 1
 
 prior_cost_weight: 0.0
-regularization_cost_weight: 0.1
+regularization_cost_weight: 1.0
 distance_cost_weight: 10.0
 bearing_cost_weight: 50.0
 

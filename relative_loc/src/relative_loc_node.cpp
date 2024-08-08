@@ -342,7 +342,7 @@ int main(int argc, char **argv)
         }
     };
     ros::Subscriber odom_sub =
-        nh.subscribe<nav_msgs::Odometry>((string)param["odom_topic"], 1000,
+        nh.subscribe<nav_msgs::Odometry>("self_odom", 1000,
                                          odomCallback,
                                          ros::VoidConstPtr(),
                                          ros::TransportHints().tcpNoDelay());
@@ -421,9 +421,9 @@ int main(int argc, char **argv)
         map<int, deque<nav_msgs::Odometry>> swarm_odom_raw;
         auto swarmOdomCallback = [&](const nav_msgs::Odometry::ConstPtr &msg)
         {
-            CHECK_EQ(msg->child_frame_id.substr(0, 6), "drone_");
+            CHECK_EQ(msg->header.frame_id.substr(0, 6), "drone_");
 
-            int id = atoi(msg->child_frame_id.substr(6, 10).c_str());
+            int id = atoi(msg->header.frame_id.substr(6, 10).c_str());
             CHECK(drone_id.find(id) != drone_id.end()) << "Drone " << id << " is not in the swarm #^#";
             if (abs((msg->header.stamp - ros::Time::now()).toSec()) > 1.0)
                 LOG(ERROR) << "Timestamp of a odom from drone " << id << " is more than 1.0s later (or earlier) than current time @_@";
@@ -487,9 +487,9 @@ int main(int argc, char **argv)
         ros::Publisher swarm_drift_gt_pub = nh.advertise<relative_loc::Drift>((string)param["drift_gt_topic"], 1000);
         auto swarmOdomGtCallback = [&](const nav_msgs::Odometry::ConstPtr &msg)
         {
-            CHECK_EQ(msg->child_frame_id.substr(0, 6), "drone_");
+            CHECK_EQ(msg->header.frame_id.substr(0, 6), "drone_");
 
-            int id = atoi(msg->child_frame_id.substr(6, 10).c_str());
+            int id = atoi(msg->header.frame_id.substr(6, 10).c_str());
             CHECK(drone_id.find(id) != drone_id.end()) << "Drone " << id << " is not in the swarm #^#";
             if (abs((msg->header.stamp - ros::Time::now()).toSec()) > 1.0)
                 LOG(ERROR) << "Timestamp of a groundtruth odom from drone " << id << " is more than 1.0s later (or earlier) than current time @_@";
@@ -607,7 +607,6 @@ int main(int argc, char **argv)
         deque<DistMeas> swarm_dist_meas;
         deque<AnonymousBearingMeas> swarm_anonymous_bearing_meas;
         atomic<bool> fresh_dist_meas_ready(false);
-        atomic<bool> fresh_anonymous_bearing_meas_ready(false);
         map<int, bool> inform_no_odom;
         for (auto id : drone_id)
             inform_no_odom[id] = true;
@@ -844,7 +843,6 @@ int main(int argc, char **argv)
                                     // TODO: a lot of copy so far #^# Use move instead
                                 }
 
-                                fresh_anonymous_bearing_meas_ready = true;
                                 jupiters.pop_front();
                             }
                         }
@@ -1088,7 +1086,6 @@ int main(int argc, char **argv)
         };
 
         deque<BearingMeas> swarm_bearing_meas;
-        atomic<bool> fresh_bearing_meas_ready{false};
         ros::Publisher swarm_bearing_diff_pub = nh.advertise<std_msgs::Float32>((string)param["swarm_bearing_diff_topic"], 1000);
         ros::Publisher swarm_bearing_diff_before_opt_pub = nh.advertise<std_msgs::Float32>((string)param["swarm_bearing_diff_before_opt_topic"], 1000);
         auto deanonymizeBearingMeas = [&]()
@@ -1165,8 +1162,6 @@ int main(int argc, char **argv)
 
                     swarm_bearing_meas.push_back(bearing_meas);
 
-                    fresh_bearing_meas_ready = true;
-
                     if (publish_debug_topics)
                     {
                         std_msgs::Float32 bearing_diff_msg, bearing_diff_before_opt_msg;
@@ -1188,7 +1183,7 @@ int main(int argc, char **argv)
                 swarm_bearing_meas.pop_front();
         };
 
-        auto optimizeOverBearingMeas = [&]()
+        auto optimizeOverDistanceAndBearingMeas = [&]()
         {
             ceres::Problem problem;
 
@@ -1389,7 +1384,7 @@ int main(int argc, char **argv)
                 if (enable_bearing)
                 {
                     deanonymizeBearingMeas();
-                    optimizeOverBearingMeas();
+                    optimizeOverDistanceAndBearingMeas();
                 }
                 else
                     optimizeOverDistanceMeas();
