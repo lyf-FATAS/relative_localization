@@ -1187,13 +1187,13 @@ int main(int argc, char **argv)
         {
             ceres::Problem problem;
 
-            lock_guard<mutex> lock(swarm_drift_mtx);
+            lock_guard<mutex> lock1(swarm_drift_mtx);
+            lock_guard<mutex> lock2(dist_meas_mtx);
+            int N_dist_meas = swarm_dist_meas.size();
 
             { // Distance measurement cost
-                lock_guard<mutex> lock(dist_meas_mtx);
 
                 // Regularization cost: keep the drift close to initial value
-                int N_dist_meas = swarm_dist_meas.size();
                 for (auto &[id, drift] : swarm_drift)
                 {
                     ceres::CostFunction *regularization_cost = RegularizationCostFunctor::Create(drift.translation,
@@ -1296,6 +1296,11 @@ int main(int argc, char **argv)
 
             { // Bearing measurement cost
                 lock_guard<mutex> lock(bearing_meas_mtx);
+                int N_bearing_meas = swarm_bearing_meas.size();
+
+                if (N_bearing_meas <= 5)
+                    LOG(WARNING) << "Number of bearing measurements is limited (" << N_bearing_meas << " < 5), may lead to degradation of the optimization #^#";
+
                 for (const BearingMeas &bearing_meas : swarm_bearing_meas)
                 {
                     // Keep sliding_window_length seconds measurements in the sliding window
@@ -1307,7 +1312,7 @@ int main(int argc, char **argv)
                                                                                    bearing_meas.ganymede.position,
                                                                                    bearing_meas.ganymede.orientation,
                                                                                    bearing_meas.bearing,
-                                                                                   bearing_cost_weight,
+                                                                                   ((double)N_dist_meas / N_bearing_meas) * bearing_cost_weight,
                                                                                    optimize_z,
                                                                                    optimize_yaw);
 
@@ -1413,7 +1418,9 @@ int main(int argc, char **argv)
 
         auto recvDriftCallback = [&](const relative_loc::Drift::ConstPtr &msg)
         {
-            CHECK_EQ(msg->id, self_id);
+            if (msg->id != self_id)
+                return;
+
             if (abs((msg->drift.header.stamp - ros::Time::now()).toSec()) > 1.0)
                 LOG(ERROR) << "Timestamp of drift from center is more than 1.0s later (or earlier) than current time @_@";
 

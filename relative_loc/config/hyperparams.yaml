@@ -2,10 +2,13 @@
 
 drone_id_and_uwb_ext:
   - id: 0
-    is_lidar: 1
+    is_lidar: 0
     uwb_ext: [0.0, 0.0, 0.0]
   - id: 1
-    is_lidar: 0
+    is_lidar: 1
+    uwb_ext: [0.0, 0.0, 0.0]
+  - id: 2
+    is_lidar: 1
     uwb_ext: [0.0, 0.0, 0.0]
 uwb_bias: 0.25
 consider_uwb_extrinsic: 0
@@ -46,10 +49,10 @@ optimize_per_N_meas: 1
 prior_cost_weight: 0.0
 regularization_cost_weight: 1.0
 distance_cost_weight: 10.0
-bearing_cost_weight: 50.0
+bearing_cost_weight: 10.0
 
 distance_outlier_threshold: 1.0
-max_deanonymization_bearing_angle: 60.0    # In degrees
+max_deanonymization_bearing_angle: 45.0    # In degrees
 huber_threshold: 1.0
 
 ceres_verbosity_level: 0                   # 0: Silent  1: Quiet    2: Verbose
