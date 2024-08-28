@@ -421,9 +421,9 @@ int main(int argc, char **argv)
         map<int, deque<nav_msgs::Odometry>> swarm_odom_raw;
         auto swarmOdomCallback = [&](const nav_msgs::Odometry::ConstPtr &msg)
         {
-            CHECK_EQ(msg->header.frame_id.substr(0, 6), "drone_");
+            CHECK_EQ(msg->child_frame_id.substr(0, 6), "drone_");
 
-            int id = atoi(msg->header.frame_id.substr(6, 10).c_str());
+            int id = atoi(msg->child_frame_id.substr(6, 10).c_str());
             CHECK(drone_id.find(id) != drone_id.end()) << "Drone " << id << " is not in the swarm #^#";
             if (abs((msg->header.stamp - ros::Time::now()).toSec()) > 1.0)
                 LOG(ERROR) << "Timestamp of a odom from drone " << id << " is more than 1.0s later (or earlier) than current time @_@";
@@ -487,9 +487,9 @@ int main(int argc, char **argv)
         ros::Publisher swarm_drift_gt_pub = nh.advertise<relative_loc::Drift>((string)param["drift_gt_topic"], 1000);
         auto swarmOdomGtCallback = [&](const nav_msgs::Odometry::ConstPtr &msg)
         {
-            CHECK_EQ(msg->header.frame_id.substr(0, 6), "drone_");
+            CHECK_EQ(msg->child_frame_id.substr(0, 6), "drone_");
 
-            int id = atoi(msg->header.frame_id.substr(6, 10).c_str());
+            int id = atoi(msg->child_frame_id.substr(6, 10).c_str());
             CHECK(drone_id.find(id) != drone_id.end()) << "Drone " << id << " is not in the swarm #^#";
             if (abs((msg->header.stamp - ros::Time::now()).toSec()) > 1.0)
                 LOG(ERROR) << "Timestamp of a groundtruth odom from drone " << id << " is more than 1.0s later (or earlier) than current time @_@";
