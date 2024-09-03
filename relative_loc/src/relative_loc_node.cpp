@@ -267,9 +267,6 @@ private:
 
 int main(int argc, char **argv)
 {
-    // Quaterniond drift_q_(AngleAxisd(-0.15, Vector3d::UnitZ()));
-    // cout << -(drift_q_ * Vector3d(-0.66, -1.04, 0.23)).transpose() << endl;
-
     google::InitGoogleLogging(argv[0]);
     FLAGS_colorlogtostderr = true;
 

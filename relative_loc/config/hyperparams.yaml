@@ -1,6 +1,6 @@
 %YAML:1.0
 
-drone_id_and_uwb_ext:
+drone_id_and_uwb_ext: # TODO: require custom param tuning
   - id: 0
     is_lidar: 0
     uwb_ext: [0.0, 0.0, 0.0]
@@ -36,19 +36,19 @@ uwb_anchor_id_and_position:
 
 revised_odom_topic: "revised_odom"
 
-swarm_odom_topic: "/others_odom"
+swarm_odom_topic: "/others_odom" # TODO: require custom param tuning
 swarm_odom_gt_topic: "/others_odom_gt"
-swarm_odom_freq: 3.0
+swarm_odom_freq: 3.0 # TODO: require custom param tuning
 
-distance_measurement_topic: "/distance_meas"
-distance_measurement_freq: 3.0
+distance_measurement_topic: "/distance_meas" # TODO: require custom param tuning
+distance_measurement_freq: 3.0 # TODO: require custom param tuning
 
 enable_bearing: 0
 bearing_measurement_topic: "/bearing_meas"
 bearing_measurement_freq: 2.0
 
-drift_from_center_topic: "/drift_from_center"
-drift_to_edges_topic: "/drift_to_edges"
+drift_from_center_topic: "/drift_from_center" # TODO: require custom param tuning
+drift_to_edges_topic: "/drift_to_edges" # TODO: require custom param tuning
 drift_gt_topic: "/drift_gt"
 
 # Debug topics
@@ -59,12 +59,12 @@ swarm_bearing_diff_before_opt_topic: "/debug_bearing_diff_before_opt"
 
 optimize_z: 0
 optimize_yaw: 0
-sliding_window_length: 6                   # In seconds
-optimize_per_N_meas: 3
+sliding_window_length: 3                   # In seconds
+optimize_per_N_meas: 1
 
 prior_cost_weight: 0.0
-regularization_cost_weight: 0.01
-distance_cost_weight: 3.0
+regularization_cost_weight: 1.0
+distance_cost_weight: 10.0
 bearing_cost_weight: 10.0
 
 distance_outlier_threshold: 1.0
